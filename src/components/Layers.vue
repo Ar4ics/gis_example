@@ -50,8 +50,9 @@ export default {
     eventBus.$on("layer-updated", layerName => {
       let index = this.layers.findIndex(e => e.Name === layerName);
       this.layers[index].active = true;
-      this.$forceUpdate();
-      eventBus.$emit("layers-submitted", this.layers);
+      this.layers = this.layers.slice();
+      let targetLayers = this.layers.filter(e => e.active);
+      this.submitLayers(targetLayers);
     });
   },
 
@@ -70,8 +71,12 @@ export default {
       } else {
         targetLayers = this.layers.filter(e => e.active);
       }
-      console.log("drawLayer", targetLayers);
-      eventBus.$emit("layers-submitted", targetLayers);
+      this.submitLayers(targetLayers);
+    },
+
+    submitLayers(layers) {
+      console.log("drawLayer", layers);
+      eventBus.$emit("layers-submitted", layers);
     },
 
     drawLayers(layers) {
