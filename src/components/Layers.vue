@@ -17,10 +17,15 @@
 
 <style lang="scss">
 #control {
+  background-color: rgba(255, 255, 255, 0.8);
   z-index: 1;
   position: absolute;
   right: 10%;
   bottom: 50%;
+}
+ul {
+  margin: 0;
+  padding: 0;
 }
 ul li {
   list-style-type: none;
@@ -31,7 +36,6 @@ ul li {
 import WMSCapabilities from "ol/format/WMSCapabilities";
 import axios from "axios";
 import { eventBus } from "../main.js";
-
 export default {
   data() {
     return {
@@ -40,6 +44,15 @@ export default {
   },
   mounted: function() {
     this.getLayers();
+  },
+
+  created() {
+    eventBus.$on("layer-updated", layerName => {
+      let index = this.layers.findIndex(e => e.Name === layerName);
+      this.layers[index].active = true;
+      this.$forceUpdate();
+      eventBus.$emit("layers-submitted", this.layers);
+    });
   },
 
   methods: {

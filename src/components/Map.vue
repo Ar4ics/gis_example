@@ -1,28 +1,57 @@
 <template>
   <div id="container">
     <div id="map" class="map"></div>
-    <select id="units">
-      <option value="degrees">degrees</option>
-      <option value="imperial">imperial inch</option>
-      <option value="us">us inch</option>
-      <option value="nautical">nautical mile</option>
-      <option value="metric" selected>metric</option>
-    </select>
+    <div id="below">
+      <select id="units">
+        <option value="degrees">degrees</option>
+        <option value="imperial">imperial inch</option>
+        <option value="us">us inch</option>
+        <option value="nautical">nautical mile</option>
+        <option value="metric" selected>metric</option>
+      </select>
 
-    <select id="type">
-      <option value="scaleline">ScaleLine</option>
-      <option value="scalebar">ScaleBar</option>
-    </select>
+      <select id="type">
+        <option value="scaleline">ScaleLine</option>
+        <option value="scalebar">ScaleBar</option>
+      </select>
 
-    <select id="steps" style="display:none">
-      <option value="2">2 steps</option>
-      <option value="4" selected>4 steps</option>
-      <option value="6">6 steps</option>
-      <option value="8">8 steps</option>
-    </select>
+      <select id="steps" style="display:none">
+        <option value="2">2 steps</option>
+        <option value="4" selected>4 steps</option>
+        <option value="6">6 steps</option>
+        <option value="8">8 steps</option>
+      </select>
 
-    <div id="showScaleTextDiv" style="display:none">
-      <input type="checkbox" id="showScaleText" checked />Show scale text
+      <div id="showScaleTextDiv" style="display:none">
+        <input type="checkbox" id="showScaleText" checked />Show scale text
+      </div>
+
+      <div id="mouse-position"></div>
+      <form>
+        <label>Projection</label>
+        <select id="projection">
+          <option value="EPSG:4326">EPSG:4326</option>
+          <option value="EPSG:3857">EPSG:3857</option>
+        </select>
+        <label>Precision</label>
+        <input id="precision" type="number" min="0" max="12" value="4" />
+      </form>
+
+      <div>
+        <label>
+          Latitude
+          <input type="text" v-model="lat" />
+        </label>
+        <label>
+          Longitude
+          <input type="text" v-model="lng" />
+        </label>
+        <label>
+          Zoom
+          <input type="text" v-model="zoom" />
+        </label>
+        <button v-on:click="go()">Перейти</button>
+      </div>
     </div>
   </div>
 </template>
@@ -31,8 +60,14 @@
 @import "~ol/ol.css";
 #map {
   width: 100%;
-  height: 95%;
+  height: calc(100% - 100px);
 }
+
+#below {
+  width: 100%;
+  height: 100px;
+}
+
 #container {
   width: 100%;
   height: 100%;
@@ -52,18 +87,39 @@ import Map from "ol/Map";
 import { Tile as TileLayer } from "ol/layer";
 import TileWMS from "ol/source/TileWMS";
 import OSM, { ATTRIBUTION } from "ol/source/OSM";
-import sync from "ol-hashed";
 import { defaults as defaultControls, Control, ScaleLine } from "ol/control";
-import { defaults } from "ol/interaction";
+import {
+  defaults as defaultInteractions,
+  Modify,
+  Select
+} from "ol/interaction";
 import * as ol from "ol";
 import * as olProj from "ol/proj";
-
+import MousePosition from "ol/control/MousePosition";
+import { createStringXY } from "ol/coordinate";
 import { eventBus } from "../main.js";
+import WFS from "ol/format/WFS";
+
+import VectorLayer from "ol/layer/Vector";
+import VectorSource from "ol/source/Vector";
+import GeoJSON from "ol/format/GeoJSON";
+import GML from "ol/format/GML";
+import { bbox as bboxStrategy } from "ol/loadingstrategy";
+import { Stroke, Style } from "ol/style";
+
+import $ from "jquery";
 
 export default {
   data() {
     return {
       map: null,
+      view: null,
+      lng: 55.96779,
+      lat: 54.74306,
+      zoom: 12,
+      str: null,
+      namespace: "gis_example",
+      vectorTileName: "landuse",
       targetLayers: []
     };
   },
@@ -76,10 +132,23 @@ export default {
   },
 
   methods: {
+    go() {
+      const place = olProj.transform(
+        [this.lng, this.lat],
+        "EPSG:4326",
+        "EPSG:3857"
+      );
+      this.view.animate({
+        center: place,
+        zoom: this.zoom,
+        duration: 1000
+      });
+    },
+
     removeLayers() {
       var layersToRemove = [];
-      this.map.getLayers().forEach(function(layer) {
-        if (layer.Name !== "Main") {
+      this.map.getLayers().forEach(layer => {
+        if (layer.Name !== "Main" && layer.Name !== "Vector") {
           layersToRemove.push(layer);
         }
       });
@@ -151,7 +220,7 @@ export default {
     var osm = new TileLayer({
       source: new OSM({
         attributions: [
-          'All maps © <a href="https://www.opencyclemap.org/">OpenCycleMap</a>',
+          'All maps Â© <a href="https://www.opencyclemap.org/">OpenCycleMap</a>',
           ATTRIBUTION
         ],
         url:
@@ -162,15 +231,19 @@ export default {
 
     osm.Name = "Main";
 
-    var london = olProj.transform(
-      [20.509207, 54.715424],
-      "EPSG:4326",
-      "EPSG:3857"
-    );
-
     var view = new ol.View({
-      center: london,
-      zoom: 8
+      center: [0, 0],
+      zoom: 2
+    });
+
+    var mousePositionControl = new MousePosition({
+      coordinateFormat: createStringXY(4),
+      projection: "EPSG:4326",
+      // comment the following two lines to have the mouse position
+      // be placed within the map.
+      className: "custom-mouse-position",
+      target: document.getElementById("mouse-position"),
+      undefinedHTML: "&nbsp;"
     });
 
     var RotateNorthControl = /*@__PURE__*/ (function(Control) {
@@ -211,8 +284,45 @@ export default {
       return RotateNorthControl;
     })(Control);
 
+    var select = new Select({
+      wrapX: false
+    });
+
+    var modify = new Modify({
+      features: select.getFeatures()
+    });
+
+    var vectorSource = new VectorSource({
+      format: new GeoJSON(),
+      url: extent => {
+        return (
+          "http://localhost:8080/geoserver/wfs?service=WFS&" +
+          "request=GetFeature&typename=" +
+          this.vectorTileName +
+          "&" +
+          "outputFormat=application/json&srsname=EPSG:3857&" +
+          "bbox=" +
+          extent.join(",") +
+          ",EPSG:3857"
+        );
+      },
+      strategy: bboxStrategy
+    });
+
+    var vector = new VectorLayer({
+      source: vectorSource,
+      style: new Style({
+        stroke: new Stroke({
+          color: "rgba(0, 0, 255, 1.0)",
+          width: 2
+        })
+      })
+    });
+
+    vector.Name = "Vector";
+
     var map = new Map({
-      interactions: defaults({
+      interactions: defaultInteractions({
         doubleClickZoom: true,
         dragAndDrop: true,
         dragPan: true,
@@ -221,19 +331,96 @@ export default {
         mouseWheelZoom: true,
         pointer: true,
         select: true
-      }),
+      }).extend([select, modify]),
       controls: defaultControls().extend([
         scaleControl(),
-        new RotateNorthControl()
+        new RotateNorthControl(),
+        mousePositionControl
       ]),
-      layers: [osm],
+      layers: [osm, vector],
       target: "map",
       view
     });
 
-    sync(map);
+    modify.on("modifyend", evt => {
+      console.log(evt);
+      var target = evt.features.getArray();
+      console.log(target);
+
+      var wfst = new WFS();
+      var gml = new GML({
+        featureNS: "http://localhost:8080/geoserver/gis_example",
+        featureType: this.vectorTileName,
+        srsName: "EPSG:3857"
+      });
+      var node = wfst.writeTransaction(null, target, null, gml);
+      var str = new XMLSerializer().serializeToString(node);
+      str = str
+        .replace(
+          "feature:" + this.vectorTileName,
+          this.namespace + ":" + this.vectorTileName
+        )
+        .replace("geometry", "geom");
+      console.log(str);
+
+      this.str = str;
+
+      $.ajax({
+        url: "http://localhost:8080/geoserver/gis_example/wfs",
+        data: str,
+        service: "WFS",
+        type: "POST",
+        dataType: "xml",
+        processData: false,
+        contentType: "text/xml",
+        success: function(data) {
+          var result = wfst.readTransactionResponse(data);
+          console.log(result);
+
+          const tile = new TileLayer({
+            source: new TileWMS({
+              url: "http://localhost:8080/geoserver/gis_example/wms",
+              params: {
+                LAYERS: "gis_example:" + this.vectorTileName,
+                TILED: true
+              },
+              serverType: "geoserver",
+              projection: "EPSG:4326",
+              transition: 0
+            })
+          });
+          tile.Name = this.vectorTileName;
+          const index = this.targetLayers.findIndex(
+            e => e.Name === this.vectorTileName
+          );
+          this.targetLayers[index] = tile;
+          this.targetLayers = this.targetLayers.slice();
+
+          eventBus.$emit("layer-updated", this.vectorTileName);
+        },
+        error: function(e) {
+          var errorMsg = e ? e.status + " " + e.statusText : "";
+          console.log(
+            "Error saving this feature to GeoServer.<br><br>" + errorMsg
+          );
+        },
+        context: this
+      });
+    });
 
     this.map = map;
+    this.view = view;
+
+    var projectionSelect = document.getElementById("projection");
+    projectionSelect.addEventListener("change", function(event) {
+      mousePositionControl.setProjection(event.target.value);
+    });
+
+    var precisionInput = document.getElementById("precision");
+    precisionInput.addEventListener("change", function(event) {
+      var format = createStringXY(event.target.valueAsNumber);
+      mousePositionControl.setCoordinateFormat(format);
+    });
 
     function onChange() {
       control.setUnits(unitsSelect.value);
@@ -266,6 +453,8 @@ export default {
     typeSelect.addEventListener("change", onChangeType);
     stepsSelect.addEventListener("change", onChangeSteps);
     scaleTextCheckbox.addEventListener("change", onChangeScaleText);
+
+    this.go();
   }
 };
 </script>
